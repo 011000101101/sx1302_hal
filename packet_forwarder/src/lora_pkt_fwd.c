@@ -1670,8 +1670,25 @@ int main(int argc, char ** argv)
         printf("INFO: concentrator EUI: 0x%016" PRIx64 "\n", eui);
     }
 
-    /* spawn threads to manage upstream and downstream */
-    i = pthread_create(&thrid_up, NULL, (void * (*)(void *))thread_up, NULL);
+    pthread_attr_t attr;
+    pthread_t      thid;
+
+    i = pthread_attr_init(&attr);
+    if (i == -1) {
+       perror("error in pthread_attr_init");
+       exit(1);
+    }
+
+    int s1 = 409600;
+    i = pthread_attr_setstacksize(&attr, s1);
+    if (i == -1) {
+       perror("error in pthread_attr_setstacksize");
+       exit(2);
+    }
+
+     /* spawn threads to manage upstream and downstream */
+//    i = pthread_create(&thrid_up, NULL, (void * (*)(void *))thread_up, NULL);
+    i = pthread_create(&thrid_up, &attr, (void * (*)(void *))thread_up, NULL);
     if (i != 0) {
         MSG("ERROR: [main] impossible to create upstream thread\n");
         exit(EXIT_FAILURE);
