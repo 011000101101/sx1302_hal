@@ -2609,7 +2609,7 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
                 }
             } else {
                 tx_to_frame_synch_0 = (sync_word >> 4) << 1;
-                tx_to_frame_synch_1 = (sync_word << 4) >> 3;
+                tx_to_frame_synch_1 = (sync_word & 0x0F) << 1;
                 if ((tx_to_frame_synch_0 >= 32 || tx_to_frame_synch_1 >= 32) && pkt_data->datarate == DR_LORA_SF5) {
                     DEBUG_PRINTF("WARNING: Setting invalid LoRa syncword for SF5: 0x%02x (symbol space too small.)\n", sync_word);
                 } else if ((tx_to_frame_synch_0 >= 64 || tx_to_frame_synch_1 >= 64) && pkt_data->datarate == DR_LORA_SF6) {
