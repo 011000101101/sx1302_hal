@@ -3149,6 +3149,12 @@ void thread_down(void) {
                 continue;
             }
 
+            /* parse sync word (optional field) */
+            val = json_object_get_value(txpk_obj,"sync");
+            if (val != NULL) {
+                txpkt.sync_word = (int8_t)json_value_get_number(val);
+            }
+
             /* Parse payload length (mandatory) */
             val = json_object_get_value(txpk_obj,"size");
             if (val == NULL) {

@@ -2596,19 +2596,31 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
             CHECK_ERR(err);
 
             /* Syncword */
-            if ((lwan_public == false) || (pkt_data->datarate == DR_LORA_SF5) || (pkt_data->datarate == DR_LORA_SF6)) {
-                DEBUG_MSG("Setting LoRa syncword 0x12\n");
-                err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_0_PEAK1_POS(pkt_data->rf_chain), 2);
-                CHECK_ERR(err);
-                err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_1_PEAK2_POS(pkt_data->rf_chain), 4);
-                CHECK_ERR(err);
+            uint8_t sync_word = pkt_data->sync_word;
+            int32_t tx_to_frame_synch_0;
+            int32_t tx_to_frame_synch_1;
+            if (sync_word == 0) {
+                if ((lwan_public == false) || (pkt_data->datarate == DR_LORA_SF5) || (pkt_data->datarate == DR_LORA_SF6)) {
+                    tx_to_frame_synch_0 = 2;
+                    tx_to_frame_synch_1 = 4;
+                } else {
+                    tx_to_frame_synch_0 = 6;
+                    tx_to_frame_synch_1 = 8;
+                }
             } else {
-                DEBUG_MSG("Setting LoRa syncword 0x34\n");
-                err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_0_PEAK1_POS(pkt_data->rf_chain), 6);
-                CHECK_ERR(err);
-                err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_1_PEAK2_POS(pkt_data->rf_chain), 8);
-                CHECK_ERR(err);
+                tx_to_frame_synch_0 = (sync_word >> 4) << 1;
+                tx_to_frame_synch_1 = (sync_word << 4) >> 3;
+                if ((tx_to_frame_synch_0 >= 32 || tx_to_frame_synch_1 >= 32) && pkt_data->datarate == DR_LORA_SF5) {
+                    DEBUG_PRINTF("WARNING: Setting invalid LoRa syncword for SF5: 0x%02x (symbol space too small.)\n", sync_word);
+                } else if ((tx_to_frame_synch_0 >= 64 || tx_to_frame_synch_1 >= 64) && pkt_data->datarate == DR_LORA_SF6) {
+                    DEBUG_PRINTF("WARNING: Setting invalid LoRa syncword for SF6: 0x%02x (symbol space too small.)\n", sync_word);
+                }
             }
+            DEBUG_PRINTF("Setting LoRa syncword %0x2\n", sync_word);
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_0_PEAK1_POS(pkt_data->rf_chain), tx_to_frame_synch_0);
+            CHECK_ERR(err);
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_1_PEAK2_POS(pkt_data->rf_chain), tx_to_frame_synch_1);
+            CHECK_ERR(err);
 
             /* Set Fine Sync for SF5/SF6 */
             if ((pkt_data->datarate == DR_LORA_SF5) || (pkt_data->datarate == DR_LORA_SF6)) {
