@@ -3152,7 +3152,13 @@ void thread_down(void) {
             /* parse sync word (optional field) */
             val = json_object_get_value(txpk_obj,"sync");
             if (val != NULL) {
-                txpkt.sync_word = (int8_t)json_value_get_number(val);
+                txpkt.synch_word = (int8_t)json_value_get_number(val);
+            }
+
+            /* parse sync word low bits (optional field) */
+            val = json_object_get_value(txpk_obj,"synl");
+            if (val != NULL) {
+                txpkt.synch_word_low = (int8_t)json_value_get_number(val);
             }
 
             /* Parse payload length (mandatory) */

@@ -262,7 +262,8 @@ struct lgw_pkt_tx_s {
     uint16_t    preamble;       /*!> set the preamble length, 0 for default */
     bool        no_crc;         /*!> if true, do not send a CRC in the packet */
     bool        no_header;      /*!> if true, enable implicit header mode (LoRa), fixed length (FSK) */
-    uint8_t     sync_word;      /*!> sync word value, or default (LoRaWAN private or public) if 0 */
+    uint8_t     synch_word;      /*!> sync word value, or default (LoRaWAN private or public) if 0 */
+    uint8_t     synch_word_low;  /*!> sync word low bits to set fine-grained symbol values, defaults to 0; synch_0 bit mask 0x10, synch_1 bit mask 0x01 */
     uint16_t    size;           /*!> payload size in bytes */
     uint8_t     payload[256];   /*!> buffer containing the payload */
 };
