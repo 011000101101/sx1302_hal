@@ -3161,6 +3161,15 @@ void thread_down(void) {
                 txpkt.synch_word_low = (int8_t)json_value_get_number(val);
             }
 
+            /* parse manual ldro setting (optional field) */
+            val = json_object_get_value(txpk_obj,"ldro");
+            if (val != NULL) {
+                txpkt.ldro_mode_manual = true;
+                txpkt.ldro_on = (bool)json_value_get_boolean(val);
+            } else {
+                txpkt.ldro_mode_manual = false;
+            }
+
             /* Parse payload length (mandatory) */
             val = json_object_get_value(txpk_obj,"size");
             if (val == NULL) {

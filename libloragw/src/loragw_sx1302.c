@@ -2638,10 +2638,19 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
             err = lgw_reg_w(SX1302_REG_TX_TOP_TXRX_CFG0_3_PAYLOAD_LENGTH(pkt_data->rf_chain), pkt_data->size);
             CHECK_ERR(err);
 
+            bool ldro_mode_manual = pkt_data->ldro_mode_manual;
+            bool ldro;
+            if (ldro_mode_manual) {
+                // LDRO requested manually, set to requested value
+                ldro = pkt_data->ldro_on;
+            } else {
+                // LDRO not requested manually, derive from TX params
+                ldro = SET_PPM_ON(pkt_data->bandwidth, pkt_data->datarate);
+            }
             /* Set PPM offset (low datarate optimization) */
             err = lgw_reg_w(SX1302_REG_TX_TOP_TXRX_CFG0_1_PPM_OFFSET_HDR_CTRL(pkt_data->rf_chain), 0);
             CHECK_ERR(err);
-            if (SET_PPM_ON(pkt_data->bandwidth, pkt_data->datarate)) {
+            if (ldro) {
                 DEBUG_MSG("Low datarate optimization ENABLED\n");
                 err = lgw_reg_w(SX1302_REG_TX_TOP_TXRX_CFG0_1_PPM_OFFSET(pkt_data->rf_chain), 1);
                 CHECK_ERR(err);
