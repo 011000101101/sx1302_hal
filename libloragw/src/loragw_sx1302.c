@@ -1108,7 +1108,7 @@ int sx1302_modem_enable(void) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-int sx1302_lora_syncword(bool public, uint8_t lora_service_sf) {
+int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word) {
     int err = LGW_REG_SUCCESS;
 
     /* Multi-SF modem configuration */
@@ -1127,16 +1127,30 @@ int sx1302_lora_syncword(bool public, uint8_t lora_service_sf) {
         err |= lgw_reg_w(SX1302_REG_RX_TOP_FRAME_SYNCH1_SF7TO12_PEAK2_POS_SF7TO12, 4);
     }
 
-    /* LoRa Service modem configuration */
-    if ((public == false) || (lora_service_sf == DR_LORA_SF5) || (lora_service_sf == DR_LORA_SF6)) {
-        DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword PRIVATE (0x12)\n", lora_service_sf);
-        err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH0_PEAK1_POS, 2);
-        err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH1_PEAK2_POS, 4);
+    uint8_t lora_service_synch0;
+    uint8_t lora_service_synch1;
+    if (lora_service_sync_word == 0) {
+        // use default (LoRaWAN) synch word
+        if ((public == false) || (lora_service_sf == DR_LORA_SF5) || (lora_service_sf == DR_LORA_SF6)) {
+            DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword PRIVATE (0x12)\n", lora_service_sf);
+            lora_service_synch0 = 2;
+            lora_service_synch1 = 4;
+        } else {
+            DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword PUBLIC (0x34)\n", lora_service_sf);
+            lora_service_synch0 = 6;
+            lora_service_synch1 = 8;
+        }
     } else {
-        DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword PUBLIC (0x34)\n", lora_service_sf);
-        err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH0_PEAK1_POS, 6);
-        err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH1_PEAK2_POS, 8);
+        printf("SHISH KEBAB!");
+        fflush(stdout);
+        // use custom synch word supplied in the config
+        DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword CUSTOM (0x%x)\n", lora_service_sf, lora_service_sync_word);
+        lora_service_synch0 = ((lora_service_sync_word & 0xF0) >> 4) << 1;
+        lora_service_synch1 = (lora_service_sync_word & 0x0F) << 1;
     }
+    /* LoRa Service modem configuration */
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH0_PEAK1_POS, lora_service_synch0);
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH1_PEAK2_POS, lora_service_synch1);
 
     return err;
 }

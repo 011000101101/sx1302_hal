@@ -141,7 +141,8 @@ static lgw_context_t lgw_context = {
         .implicit_hdr = false,
         .implicit_payload_length = 0,
         .implicit_crc_en = 0,
-        .implicit_coderate = 0
+        .implicit_coderate = 0,
+        .sync_word = 0x00
     },
     .fsk_cfg = {
         .enable = 0,    /* not used, handled by if_chain_cfg */
@@ -627,6 +628,7 @@ int lgw_rxif_setconf(uint8_t if_chain, struct lgw_conf_rxif_s * conf) {
             CONTEXT_LORA_SERVICE.implicit_payload_length = conf->implicit_payload_length;
             CONTEXT_LORA_SERVICE.implicit_crc_en   = conf->implicit_crc_en;
             CONTEXT_LORA_SERVICE.implicit_coderate = conf->implicit_coderate;
+            CONTEXT_LORA_SERVICE.sync_word = conf->sync_word;
 
             DEBUG_PRINTF("Note: LoRa 'std' if_chain %d configuration; en:%d freq:%d bw:%d dr:%d\n", if_chain,
                                                                                                     CONTEXT_IF_CHAIN[if_chain].enable,
@@ -990,7 +992,7 @@ int lgw_start(void) {
     }
 
     /* configure syncword */
-    err = sx1302_lora_syncword(CONTEXT_LWAN_PUBLIC, CONTEXT_LORA_SERVICE.datarate);
+    err = sx1302_lora_syncword(CONTEXT_LWAN_PUBLIC, CONTEXT_LORA_SERVICE.datarate, CONTEXT_LORA_SERVICE.sync_word);
     if (err != LGW_REG_SUCCESS) {
         printf("ERROR: failed to configure SX1302 LoRa syncword\n");
         return LGW_HAL_ERROR;

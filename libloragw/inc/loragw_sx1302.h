@@ -206,9 +206,10 @@ int sx1302_lora_service_correlator_configure(struct lgw_conf_rxif_s * cfg);
 @brief Configure the syncword to be used by LoRa modems (public:0x34, private:0x12)
 @param public           Set to true to use the "public" syncword, false to use the private one
 @param lora_service_sf  The spreading factor configured for the single-SF LoRa modem
+@param lora_service_sync_word   synch word for the service LoRa modem. use default (LoRaWAN public or private) if 0
 @return LGW_REG_SUCCESS if success, LGW_REG_ERROR otherwise
 */
-int sx1302_lora_syncword(bool public, uint8_t lora_service_sf);
+int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word);
 
 /**
 @brief Configure the LoRa multi-SF modems

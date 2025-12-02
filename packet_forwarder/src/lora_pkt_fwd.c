@@ -952,6 +952,12 @@ static int parse_SX130x_configuration(const char * conf_file) {
                     return -1;
                 }
             }
+            val = json_object_dotget_value(conf_obj, "chan_Lora_std.synch_word");
+            if (json_value_get_type(val) == JSONNumber) {
+                ifconf.sync_word = (uint8_t)json_value_get_number(val);
+            } else {
+                ifconf.sync_word = 0;
+            }
 
             MSG("INFO: Lora std channel> radio %i, IF %i Hz, %u Hz bw, SF %u, %s\n", ifconf.rf_chain, ifconf.freq_hz, bw, sf, (ifconf.implicit_hdr == true) ? "Implicit header" : "Explicit header");
         }
