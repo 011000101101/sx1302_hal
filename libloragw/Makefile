@@ -117,6 +117,7 @@ libloragw.a: $(OBJDIR)/loragw_spi.o \
 			 $(OBJDIR)/loragw_reg.o \
 			 $(OBJDIR)/loragw_sx1250.o \
 			 $(OBJDIR)/loragw_sx1261.o \
+			 $(OBJDIR)/loragw_sx1261_cad.o \
 			 $(OBJDIR)/loragw_sx125x.o \
 			 $(OBJDIR)/loragw_sx1302.o \
 			 $(OBJDIR)/loragw_cal.o \
