@@ -717,6 +717,8 @@ int sx1302_fsk_configure(struct lgw_conf_rxif_s * cfg) {
     uint32_t fsk_br_reg;
     int err = LGW_REG_SUCCESS;
 
+    if (cfg == NULL || cfg->sync_word_size < 1 || cfg->sync_word_size > 8 ||
+        cfg->datarate == 0 || (cfg->fsk_options_set && cfg->fsk_channel_bw_exponent > 7)) return LGW_REG_ERROR;
     DEBUG_PRINTF("FSK: syncword:0x%" PRIx64 ", syncword_size:%u\n", cfg->sync_word, cfg->sync_word_size);
 
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_1_PSIZE, cfg->sync_word_size - 1);
@@ -733,18 +735,18 @@ int sx1302_fsk_configure(struct lgw_conf_rxif_s * cfg) {
     fsk_br_reg = 32000000 / cfg->datarate;
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_BIT_RATE_MSB_BIT_RATE, (uint8_t)(fsk_br_reg >> 8));
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_BIT_RATE_LSB_BIT_RATE, (uint8_t)(fsk_br_reg >> 0));
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_1_CH_BW_EXPO, 0x03); /* 125KHz */
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_1_CH_BW_EXPO, cfg->fsk_options_set ? cfg->fsk_channel_bw_exponent : 3); /* 125KHz */
 
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_3_RX_INVERT, 0);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_3_MODEM_INVERT_IQ, 0);
 
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_4_RSSI_LENGTH, 4);
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_PKT_MODE, 1); /* variable length */
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_CRC_EN, 1);
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_DCFREE_ENC, 2);
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_CRC_IBM, 0);
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_PKT_MODE, (cfg->fsk_options_set && cfg->fsk_fixed_length) ? 0 : 1); /* variable length */
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_CRC_EN, (cfg->fsk_options_set && cfg->fsk_no_crc) ? 0 : 1);
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_DCFREE_ENC, (cfg->fsk_options_set && cfg->fsk_no_whitening) ? 0 : 2);
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_0_CRC_IBM, (cfg->fsk_options_set && cfg->fsk_crc_ibm) ? 1 : 0);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_4_ERROR_OSR_TOL, 10);
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_PKT_LENGTH_PKT_LENGTH, 255);
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_PKT_LENGTH_PKT_LENGTH, (cfg->fsk_options_set && cfg->fsk_fixed_length) ? cfg->fsk_payload_length : 255);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_NODE_ADRS_NODE_ADRS, 0);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_BROADCAST_BROADCAST, 0);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FSK_CFG_3_AUTO_AFC, 1); /* ?? */
@@ -994,7 +996,7 @@ int sx1302_lora_modem_configure(uint32_t radio_freq_hz) {
 int sx1302_lora_service_modem_configure(struct lgw_conf_rxif_s * cfg, uint32_t radio_freq_hz) {
     uint16_t mantissa = 0;
     uint8_t exponent = 0;
-    uint8_t preamble_nb_symb;
+    uint16_t preamble_nb_symb;
     int err = LGW_REG_SUCCESS;
 
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_DC_NOTCH_CFG1_ENABLE, 0x00);
@@ -1048,7 +1050,7 @@ int sx1302_lora_service_modem_configure(struct lgw_conf_rxif_s * cfg, uint32_t r
 
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG0_MODEM_SF, cfg->datarate);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG0_MODEM_BW, cfg->bandwidth);
-    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG1_PPM_OFFSET, SET_PPM_ON(cfg->bandwidth, cfg->datarate));
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG1_PPM_OFFSET, (cfg->lora_options_set && cfg->lora_ldro_manual) ? cfg->lora_ldro_on : SET_PPM_ON(cfg->bandwidth, cfg->datarate));
 
     /* Set preamble size to 8 for SF7->SF12 and to 12 for SF5->SF6 (aligned with end-device drivers) */
     if ((cfg->datarate == DR_LORA_SF5) || (cfg->datarate == DR_LORA_SF6)) {
@@ -1056,6 +1058,9 @@ int sx1302_lora_service_modem_configure(struct lgw_conf_rxif_s * cfg, uint32_t r
     } else {
         preamble_nb_symb = 8;
     }
+    if (cfg->lora_options_set && cfg->lora_preamble_symbols) preamble_nb_symb = cfg->lora_preamble_symbols;
+    err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_RX_CFG0_CHIRP_INVERT,
+                     (cfg->lora_options_set && cfg->lora_invert_pol) ? 0 : 1);
     printf("INFO: LoRa Service modem: configuring preamble size to %u symbols\n", preamble_nb_symb);
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG7_PREAMBLE_SYMB_NB, (preamble_nb_symb >> 8) & 0xFF); /* MSB */
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_TXRX_CFG6_PREAMBLE_SYMB_NB, (preamble_nb_symb >> 0) & 0xFF); /* LSB */
@@ -1108,7 +1113,14 @@ int sx1302_modem_enable(void) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word) {
+int sx1302_syncword_symbols(uint8_t sync, uint8_t fine, uint8_t *first, uint8_t *second) {
+    if (!first || !second || (fine & ~0x11U)) return LGW_REG_ERROR;
+    *first = ((sync >> 4) << 1) | ((fine & 0x10) >> 4);
+    *second = ((sync & 0x0f) << 1) | (fine & 1);
+    return LGW_REG_SUCCESS;
+}
+
+int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word, bool explicit_service_sync) {
     int err = LGW_REG_SUCCESS;
 
     /* Multi-SF modem configuration */
@@ -1129,7 +1141,7 @@ int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_serv
 
     uint8_t lora_service_synch0;
     uint8_t lora_service_synch1;
-    if (lora_service_sync_word == 0) {
+    if (!explicit_service_sync && lora_service_sync_word == 0) {
         // use default (LoRaWAN) synch word
         if ((public == false) || (lora_service_sf == DR_LORA_SF5) || (lora_service_sf == DR_LORA_SF6)) {
             DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword PRIVATE (0x12)\n", lora_service_sf);
@@ -1141,12 +1153,9 @@ int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_serv
             lora_service_synch1 = 8;
         }
     } else {
-        printf("SHISH KEBAB!");
-        fflush(stdout);
         // use custom synch word supplied in the config
         DEBUG_PRINTF("INFO: configuring LoRa (Service) SF%u with syncword CUSTOM (0x%x)\n", lora_service_sf, lora_service_sync_word);
-        lora_service_synch0 = ((lora_service_sync_word & 0xF0) >> 4) << 1;
-        lora_service_synch1 = (lora_service_sync_word & 0x0F) << 1;
+        if (sx1302_syncword_symbols(lora_service_sync_word,0,&lora_service_synch0,&lora_service_synch1) != LGW_REG_SUCCESS) return LGW_REG_ERROR;
     }
     /* LoRa Service modem configuration */
     err |= lgw_reg_w(SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH0_PEAK1_POS, lora_service_synch0);
@@ -2614,7 +2623,7 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
             uint8_t synch_word_low = pkt_data->synch_word_low;
             uint8_t tx_top_frame_synch_0;
             uint8_t tx_top_frame_synch_1;
-            if (synch_word == 0) {
+            if (!pkt_data->synch_word_set && synch_word == 0) {
                 if ((lwan_public == false) || (pkt_data->datarate == DR_LORA_SF5) || (pkt_data->datarate == DR_LORA_SF6)) {
                     tx_top_frame_synch_0 = 2;
                     tx_top_frame_synch_1 = 4;
@@ -2623,15 +2632,14 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
                     tx_top_frame_synch_1 = 8;
                 }
             } else {
-                tx_top_frame_synch_0 = ((synch_word >> 4) << 1) | ((synch_word_low & 0x10) >> 4);
-                tx_top_frame_synch_1 = ((synch_word & 0x0F) << 1) | (synch_word_low & 0x01) ;
+                if (sx1302_syncword_symbols(synch_word,synch_word_low,&tx_top_frame_synch_0,&tx_top_frame_synch_1) != LGW_REG_SUCCESS) return LGW_REG_ERROR;
                 if (((tx_top_frame_synch_0 << 2) >= 32 || (tx_top_frame_synch_1 << 2) >= 32) && pkt_data->datarate == DR_LORA_SF5) {
-                    DEBUG_PRINTF("WARNING: Setting invalid LoRa synch_word for SF5: 0x%02x (symbol space too small.)\n", sync_word);
+                    DEBUG_PRINTF("WARNING: Setting invalid LoRa synch_word for SF5: 0x%02x (symbol space too small.)\n", synch_word);
                 } else if (((tx_top_frame_synch_0 << 2) >= 64 || (tx_top_frame_synch_1 << 2) >= 64) && pkt_data->datarate == DR_LORA_SF6) {
-                    DEBUG_PRINTF("WARNING: Setting invalid LoRa synch_word for SF6: 0x%02x (symbol space too small.)\n", sync_word);
+                    DEBUG_PRINTF("WARNING: Setting invalid LoRa synch_word for SF6: 0x%02x (symbol space too small.)\n", synch_word);
                 }
             }
-            DEBUG_PRINTF("Setting LoRa syncword %0x2\n", sync_word);
+            DEBUG_PRINTF("Setting LoRa syncword %02x\n", synch_word);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_0_PEAK1_POS(pkt_data->rf_chain), tx_top_frame_synch_0);
             CHECK_ERR(err);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FRAME_SYNCH_1_PEAK2_POS(pkt_data->rf_chain), tx_top_frame_synch_1);
@@ -2694,14 +2702,21 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
             err = lgw_reg_w(SX1302_REG_AGC_MCU_MCU_MAIL_BOX_WR_DATA_BYTE0_MCU_MAIL_BOX_WR_DATA, (fdev_reg >>  0) & 0xFF); /* Needed by AGC to configure the sx1250 */
             CHECK_ERR(err);
 
+            /* Per-packet sync is local; never mutate the configured RX/default profile. */
+            struct lgw_conf_rxif_s selected_fsk = *context_fsk;
+            if (pkt_data->fsk_sync_word_set) {
+                if (pkt_data->fsk_sync_word_size < 1 || pkt_data->fsk_sync_word_size > 8) return LGW_REG_ERROR;
+                selected_fsk.sync_word = pkt_data->fsk_sync_word;
+                selected_fsk.sync_word_size = pkt_data->fsk_sync_word_size;
+            }
             /* Modulation parameters */
-            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_PKT_MODE(pkt_data->rf_chain), 1); /* Variable length */
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_PKT_MODE(pkt_data->rf_chain), (pkt_data->no_header || (pkt_data->fsk_options_set && pkt_data->fsk_fixed_length)) ? 0 : 1); /* Variable length */
             CHECK_ERR(err);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_CRC_EN(pkt_data->rf_chain), (pkt_data->no_crc) ? 0 : 1);
             CHECK_ERR(err);
-            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_CRC_IBM(pkt_data->rf_chain), 0); /* CCITT CRC */
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_CRC_IBM(pkt_data->rf_chain), (pkt_data->fsk_options_set && pkt_data->fsk_crc_ibm) ? 1 : 0); /* CCITT CRC */
             CHECK_ERR(err);
-            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_DCFREE_ENC(pkt_data->rf_chain), 2); /* Whitening Encoding */
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_CFG_0_DCFREE_ENC(pkt_data->rf_chain), (pkt_data->fsk_options_set && pkt_data->fsk_no_whitening) ? 0 : 2); /* Whitening Encoding */
             CHECK_ERR(err);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_MOD_FSK_GAUSSIAN_EN(pkt_data->rf_chain), 1);
             CHECK_ERR(err);
@@ -2709,11 +2724,11 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
             CHECK_ERR(err);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_MOD_FSK_REF_PATTERN_EN(pkt_data->rf_chain), 1);
             CHECK_ERR(err);
-            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_MOD_FSK_REF_PATTERN_SIZE(pkt_data->rf_chain), context_fsk->sync_word_size - 1);
+            err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_MOD_FSK_REF_PATTERN_SIZE(pkt_data->rf_chain), selected_fsk.sync_word_size - 1);
             CHECK_ERR(err);
 
             /* Syncword */
-            fsk_sync_word_reg = context_fsk->sync_word << (8 * (8 - context_fsk->sync_word_size));
+            fsk_sync_word_reg = selected_fsk.sync_word << (8 * (8 - selected_fsk.sync_word_size));
             err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_REF_PATTERN_BYTE0_FSK_REF_PATTERN(pkt_data->rf_chain), (uint8_t)(fsk_sync_word_reg >> 0));
             CHECK_ERR(err);
             err = lgw_reg_w(SX1302_REG_TX_TOP_FSK_REF_PATTERN_BYTE1_FSK_REF_PATTERN(pkt_data->rf_chain), (uint8_t)(fsk_sync_word_reg >> 8));
@@ -2769,7 +2784,7 @@ int sx1302_send(lgw_radio_type_t radio_type, struct lgw_tx_gain_lut_s * tx_lut, 
     err = lgw_reg_w(SX1302_REG_TX_TOP_TX_CTRL_WRITE_BUFFER(pkt_data->rf_chain), 0x01);
     CHECK_ERR(err);
     mem_addr = REG_SELECT(pkt_data->rf_chain, 0x5300, 0x5500);
-    if (pkt_data->modulation == MOD_FSK) {
+    if (pkt_data->modulation == MOD_FSK && !(pkt_data->no_header || (pkt_data->fsk_options_set && pkt_data->fsk_fixed_length))) {
         err = lgw_mem_wb(mem_addr, (uint8_t *)(&(pkt_data->size)), 1); /* insert payload size in the packet for FSK variable mode (1 byte) */
         CHECK_ERR(err);
         err = lgw_mem_wb(mem_addr+1, &(pkt_data->payload[0]), pkt_data->size);

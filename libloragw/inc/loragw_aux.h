@@ -129,6 +129,11 @@ void timeout_start(struct timeval * start);
 */
 int timeout_check(struct timeval start, uint32_t timeout_ms);
 
+/* Fork extension: airtime follows the same explicit LDRO selection as TX. */
+uint32_t lora_packet_time_on_air_ext(uint8_t bw, uint8_t sf, uint8_t cr, uint16_t preamble,
+    bool no_header, bool no_crc, uint8_t size, bool ldro_manual, bool ldro_on,
+    double *symbols, uint32_t *payload_symbols, uint16_t *symbol_us);
+
 #endif
 
 /* --- EOF ------------------------------------------------------------------ */

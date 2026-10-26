@@ -44,6 +44,13 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 /* return status code */
 #define LGW_HAL_SUCCESS     0
 #define LGW_HAL_ERROR       -1
+#define LGW_HAL_BUSY        -2
+#define LGW_HAL_NOT_IMPLEMENTED -3
+#define LORAWANTASTIC_HAL_API_VERSION 0x00020000U
+#define LGW_STD_LORA_PREAMBLE 8
+#define LGW_MIN_LORA_PREAMBLE 6
+#define LGW_STD_FSK_PREAMBLE 5
+#define LGW_MIN_FSK_PREAMBLE 3
 #define LGW_LBT_NOT_ALLOWED 1
 
 /* radio-specific parameters */
@@ -204,6 +211,22 @@ struct lgw_conf_rxif_s {
     uint8_t     implicit_payload_length;    /*!> LoRa Service implicit header payload length (number of bytes, 0 for default) */
     bool        implicit_crc_en;            /*!> LoRa Service implicit header CRC enable */
     uint8_t     implicit_coderate;          /*!> LoRa Service implicit header coding rate  */
+    /* Fork extension: presence is separate from value, including explicit zero. */
+    bool        sync_word_set;
+    bool        lora_options_set;
+    bool        lora_invert_pol;
+    bool        lora_ldro_manual;
+    bool        lora_ldro_on;
+    uint16_t    lora_preamble_symbols;
+    bool        fsk_options_set;
+    bool        fsk_fixed_length;
+    uint8_t     fsk_payload_length;
+    bool        fsk_no_crc;
+    bool        fsk_crc_ibm;
+    bool        fsk_no_whitening;
+    /* Raw hardware filter exponent. 3 is upstream's 125-kHz baseline;
+     * other exponent/RF bandwidth combinations require board characterization. */
+    uint8_t     fsk_channel_bw_exponent;
 };
 
 /**
@@ -268,6 +291,14 @@ struct lgw_pkt_tx_s {
     bool        ldro_on;        /*!> if ldro_mode_manual is true, set ldro mode depending on this variable */
     uint16_t    size;           /*!> payload size in bytes */
     uint8_t     payload[256];   /*!> buffer containing the payload */
+    bool        synch_word_set; /*!> supplied LoRa selector, including 0x00 */
+    bool        fsk_options_set;
+    bool        fsk_fixed_length;
+    bool        fsk_no_whitening;
+    bool        fsk_crc_ibm;
+    bool        fsk_sync_word_set;
+    uint8_t     fsk_sync_word_size;
+    uint64_t    fsk_sync_word;   /*!> right aligned, like RX sync_word */
 };
 
 /**

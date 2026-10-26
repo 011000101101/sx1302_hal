@@ -22,6 +22,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include <string.h>     /* strncmp */
 
 #include "loragw_sx1261.h"
+#include "loragw_sx1261_cad.h"
 #include "loragw_spi.h"
 #include "loragw_com.h"
 #include "loragw_aux.h"
@@ -470,7 +471,14 @@ int sx1261_set_rx_params(uint32_t freq_hz, uint8_t bandwidth) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
+static bool aux_lbt_active;
+static bool aux_scan_active;
+bool sx1261_aux_is_busy(void) { return aux_lbt_active || aux_scan_active; }
+void sx1261_aux_reset_acknowledge(void) { aux_lbt_active = aux_scan_active = false; }
+
 int sx1261_lbt_start(lgw_lbt_scan_time_t scan_time_us, int8_t threshold_dbm) {
+    if (sx1261_cad_is_active()) return LGW_REG_ERROR;
+
     int err;
     uint8_t buff[16];
     uint16_t nb_scan;
@@ -505,6 +513,7 @@ int sx1261_lbt_start(lgw_lbt_scan_time_t scan_time_us, int8_t threshold_dbm) {
     buff[2] = (nb_scan >> 0) & 0xFF;
     buff[3] = threshold_reg;
     buff[4] = 1; // gpioId
+    aux_lbt_active = true; /* Partial command failure keeps ownership until explicit stop/reset. */
     err = sx1261_reg_w(0x9a, buff, 5);
     CHECK_ERR(err);
 
@@ -522,6 +531,7 @@ int sx1261_lbt_start(lgw_lbt_scan_time_t scan_time_us, int8_t threshold_dbm) {
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 int sx1261_lbt_stop(void) {
+    if (sx1261_cad_is_active()) return LGW_REG_ERROR;
     int err;
     uint8_t buff[16];
     /* performances variables */
@@ -545,12 +555,15 @@ int sx1261_lbt_stop(void) {
 
     _meas_time_stop(4, tm, __FUNCTION__);
 
+    aux_lbt_active = false;
     return LGW_REG_SUCCESS;
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 int sx1261_spectral_scan_start(uint16_t nb_scan) {
+    if (sx1261_cad_is_active()) return LGW_REG_ERROR;
+
     int err;
     uint8_t buff[4]; /* 66 bytes for spectral scan results + 2 bytes register address + 1 dummy byte for reading */
     /* performances variables */
@@ -563,6 +576,7 @@ int sx1261_spectral_scan_start(uint16_t nb_scan) {
     buff[0] = (nb_scan >> 8) & 0xFF; /* nb_scan MSB */
     buff[1] = (nb_scan >> 0) & 0xFF; /* nb_scan LSB */
     buff[2] = 11; /* interval between scans - 8.2 us */
+    aux_scan_active = true; /* Partial command failure keeps ownership until explicit stop/reset. */
     err = sx1261_reg_w(0x9b, buff, 9);
     CHECK_ERR(err);
 
@@ -662,6 +676,7 @@ int sx1261_spectral_scan_status(lgw_spectral_scan_status_t * status) {
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 int sx1261_spectral_scan_abort(void) {
+    if (sx1261_cad_is_active()) return LGW_REG_ERROR;
     int err;
     uint8_t buff[16];
     /* performances variables */
@@ -681,6 +696,7 @@ int sx1261_spectral_scan_abort(void) {
 
     _meas_time_stop(4, tm, __FUNCTION__);
 
+    aux_scan_active = false;
     return LGW_REG_SUCCESS;
 }
 

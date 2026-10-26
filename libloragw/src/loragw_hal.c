@@ -35,6 +35,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 
 #include "loragw_reg.h"
 #include "loragw_hal.h"
+#include "loragw_runtime.h"
 #include "loragw_aux.h"
 #include "loragw_com.h"
 #include "loragw_i2c.h"
@@ -120,6 +121,8 @@ user that need to be propagated in the drivers.
 Parameters validity and coherency is verified by the _setconf functions and
 the _start and _send functions assume they are valid.
 */
+static uint64_t runtime_generation;
+static bool runtime_fault;
 static lgw_context_t lgw_context = {
     .is_started = false,
     .board_cfg.com_type = LGW_COM_SPI,
@@ -576,6 +579,14 @@ int lgw_rxif_setconf(uint8_t if_chain, struct lgw_conf_rxif_s * conf) {
         DEBUG_MSG("ERROR: INVALID RF_CHAIN TO ASSOCIATE WITH A LORA_STD IF CHAIN\n");
         return LGW_HAL_ERROR;
     }
+    if ((conf->sync_word_set && sx1302_get_ifmod_config(if_chain) == IF_LORA_STD && conf->sync_word > 255) ||
+        ((conf->sync_word_set || conf->sync_word != 0) && sx1302_get_ifmod_config(if_chain) == IF_FSK_STD &&
+         (conf->sync_word_size < 1 || conf->sync_word_size > 8 ||
+          (conf->sync_word_size < 8 && (conf->sync_word >> (8 * conf->sync_word_size)) != 0))) ||
+        (conf->fsk_options_set && (conf->fsk_channel_bw_exponent > 7 ||
+         (conf->fsk_fixed_length && conf->fsk_payload_length == 0))) ||
+        (conf->implicit_hdr && sx1302_get_ifmod_config(if_chain) == IF_LORA_STD &&
+         !IS_LORA_CR(conf->implicit_coderate))) return LGW_HAL_ERROR;
     /* check if IF frequency is optimal based on channel and radio bandwidths */
     switch (conf->bandwidth) {
         case BW_250KHZ:
@@ -629,6 +640,12 @@ int lgw_rxif_setconf(uint8_t if_chain, struct lgw_conf_rxif_s * conf) {
             CONTEXT_LORA_SERVICE.implicit_crc_en   = conf->implicit_crc_en;
             CONTEXT_LORA_SERVICE.implicit_coderate = conf->implicit_coderate;
             CONTEXT_LORA_SERVICE.sync_word = conf->sync_word;
+            CONTEXT_LORA_SERVICE.sync_word_set = conf->sync_word_set;
+            CONTEXT_LORA_SERVICE.lora_options_set = conf->lora_options_set;
+            CONTEXT_LORA_SERVICE.lora_invert_pol = conf->lora_invert_pol;
+            CONTEXT_LORA_SERVICE.lora_ldro_manual = conf->lora_ldro_manual;
+            CONTEXT_LORA_SERVICE.lora_ldro_on = conf->lora_ldro_on;
+            CONTEXT_LORA_SERVICE.lora_preamble_symbols = conf->lora_preamble_symbols;
 
             DEBUG_PRINTF("Note: LoRa 'std' if_chain %d configuration; en:%d freq:%d bw:%d dr:%d\n", if_chain,
                                                                                                     CONTEXT_IF_CHAIN[if_chain].enable,
@@ -687,7 +704,15 @@ int lgw_rxif_setconf(uint8_t if_chain, struct lgw_conf_rxif_s * conf) {
             CONTEXT_IF_CHAIN[if_chain].freq_hz = conf->freq_hz;
             CONTEXT_FSK.bandwidth = conf->bandwidth;
             CONTEXT_FSK.datarate = conf->datarate;
-            if (conf->sync_word > 0) {
+            CONTEXT_FSK.fsk_options_set = conf->fsk_options_set;
+            CONTEXT_FSK.fsk_fixed_length = conf->fsk_fixed_length;
+            CONTEXT_FSK.fsk_payload_length = conf->fsk_payload_length;
+            CONTEXT_FSK.fsk_no_crc = conf->fsk_no_crc;
+            CONTEXT_FSK.fsk_crc_ibm = conf->fsk_crc_ibm;
+            CONTEXT_FSK.fsk_no_whitening = conf->fsk_no_whitening;
+            CONTEXT_FSK.fsk_channel_bw_exponent = conf->fsk_channel_bw_exponent;
+            if (conf->sync_word_set || conf->sync_word > 0) {
+                CONTEXT_FSK.sync_word_set = conf->sync_word_set;
                 CONTEXT_FSK.sync_word_size = conf->sync_word_size;
                 CONTEXT_FSK.sync_word = conf->sync_word;
             }
@@ -848,6 +873,8 @@ int lgw_debug_setconf(struct lgw_conf_debug_s * conf) {
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 int lgw_start(void) {
+    if (runtime_fault) return LGW_HAL_ERROR;
+
     int i, err;
     uint8_t fw_version_agc;
 
@@ -992,7 +1019,7 @@ int lgw_start(void) {
     }
 
     /* configure syncword */
-    err = sx1302_lora_syncword(CONTEXT_LWAN_PUBLIC, CONTEXT_LORA_SERVICE.datarate, CONTEXT_LORA_SERVICE.sync_word);
+    err = sx1302_lora_syncword(CONTEXT_LWAN_PUBLIC, CONTEXT_LORA_SERVICE.datarate, CONTEXT_LORA_SERVICE.sync_word, CONTEXT_LORA_SERVICE.sync_word_set);
     if (err != LGW_REG_SUCCESS) {
         printf("ERROR: failed to configure SX1302 LoRa syncword\n");
         return LGW_HAL_ERROR;
@@ -1182,6 +1209,7 @@ int lgw_start(void) {
 
     /* set hal state */
     CONTEXT_STARTED = true;
+    ++runtime_generation;
 
     DEBUG_PRINTF(" --- %s\n", "OUT");
 
@@ -1191,6 +1219,8 @@ int lgw_start(void) {
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 int lgw_stop(void) {
+    if (sx1261_cad_is_active()) return LGW_HAL_BUSY;
+
     int i, x, err = LGW_HAL_SUCCESS;
 
     DEBUG_PRINTF(" --- %s\n", "IN");
@@ -1226,6 +1256,7 @@ int lgw_stop(void) {
     if (CONTEXT_COM_TYPE == LGW_COM_SPI) {
         DEBUG_MSG("INFO: Closing I2C for temperature sensor\n");
         x = i2c_linuxdev_close(ts_fd);
+        ts_fd = -1;
         if (x != 0) {
             printf("ERROR: failed to close I2C temperature sensor device (err=%i)\n", x);
             err = LGW_HAL_ERROR;
@@ -1234,6 +1265,7 @@ int lgw_stop(void) {
         if (CONTEXT_BOARD.full_duplex == true) {
             DEBUG_MSG("INFO: Closing I2C for AD5338R\n");
             x = i2c_linuxdev_close(ad_fd);
+            ad_fd = -1;
             if (x != 0) {
                 printf("ERROR: failed to close I2C AD5338R device (err=%i)\n", x);
                 err = LGW_HAL_ERROR;
@@ -1349,6 +1381,10 @@ int lgw_send(struct lgw_pkt_tx_s * pkt_data) {
     /* Record function start time */
     _meas_time_start(&tm);
 
+    if (pkt_data != NULL && pkt_data->modulation == MOD_FSK && pkt_data->fsk_sync_word_set &&
+        (pkt_data->fsk_sync_word_size < 1 || pkt_data->fsk_sync_word_size > 8 ||
+         (pkt_data->fsk_sync_word_size < 8 && (pkt_data->fsk_sync_word >> (8 * pkt_data->fsk_sync_word_size)) != 0))) return LGW_HAL_ERROR;
+    if (!CONTEXT_BOARD.full_duplex && sx1261_cad_is_active()) return LGW_HAL_BUSY;
     /* check if the concentrator is running */
     if (CONTEXT_STARTED == false) {
         printf("ERROR: CONCENTRATOR IS NOT RUNNING, START IT BEFORE SENDING\n");
@@ -1634,7 +1670,9 @@ uint32_t lgw_time_on_air(const struct lgw_pkt_tx_s *packet) {
     }
 
     if (packet->modulation == MOD_LORA) {
-        toa_us = lora_packet_time_on_air(packet->bandwidth, packet->datarate, packet->coderate, packet->preamble, packet->no_header, packet->no_crc, packet->size, NULL, NULL, NULL);
+        toa_us = lora_packet_time_on_air_ext(packet->bandwidth, packet->datarate, packet->coderate,
+            packet->preamble ? MAX(packet->preamble,LGW_MIN_LORA_PREAMBLE) : LGW_STD_LORA_PREAMBLE,
+            packet->no_header, packet->no_crc, packet->size, packet->ldro_mode_manual,packet->ldro_on,NULL,NULL,NULL);
         toa_ms = (uint32_t)( (double)toa_us / 1000.0 + 0.5 );
         DEBUG_PRINTF("INFO: LoRa packet ToA: %u ms\n", toa_ms);
     } else if (packet->modulation == MOD_FSK) {
@@ -1645,7 +1683,11 @@ uint32_t lgw_time_on_air(const struct lgw_pkt_tx_s *packet) {
                 PKT_PAYLOAD: x bytes
                 CRC: 0 or 2 bytes
         */
-        t_fsk = (8 * (double)(packet->preamble + CONTEXT_FSK.sync_word_size + 1 + packet->size + ((packet->no_crc == true) ? 0 : 2)) / (double)packet->datarate) * 1E3;
+        if (!IS_FSK_DR(packet->datarate) || packet->size > 255 ||
+            (packet->fsk_sync_word_set && (packet->fsk_sync_word_size < 1 || packet->fsk_sync_word_size > 8))) return 0;
+        t_fsk = (8 * (double)((packet->preamble ? MAX(packet->preamble,LGW_MIN_FSK_PREAMBLE) : LGW_STD_FSK_PREAMBLE) +
+            (packet->fsk_sync_word_set ? packet->fsk_sync_word_size : CONTEXT_FSK.sync_word_size) +
+            ((packet->no_header || (packet->fsk_options_set && packet->fsk_fixed_length)) ? 0 : 1) + packet->size + ((packet->no_crc == true) ? 0 : 2)) / (double)packet->datarate) * 1E3;
 
         /* Duration of packet */
         toa_ms = (uint32_t)t_fsk + 1; /* add margin for rounding */
@@ -1703,3 +1745,106 @@ int lgw_spectral_scan_abort() {
 }
 
 /* --- EOF ------------------------------------------------------------------ */
+
+
+int lgw_get_rx_configuration(struct lgw_rx_update *u) {
+    if (!u) return LGW_HAL_ERROR;
+    memset(u,0,sizeof *u);
+    u->rf_mask = (1U<<LGW_RF_CHAIN_NB)-1;
+    u->if_mask = (1U<<LGW_IF_CHAIN_NB)-1;
+    for (uint8_t i = 0; i < LGW_RF_CHAIN_NB; ++i) u->rf[i] = CONTEXT_RF_CHAIN[i];
+    for (uint8_t i = 0; i < LGW_IF_CHAIN_NB; ++i) {
+        if (i == 8) u->channels[i] = CONTEXT_LORA_SERVICE;
+        else if (i == 9) u->channels[i] = CONTEXT_FSK;
+        u->channels[i].enable = CONTEXT_IF_CHAIN[i].enable;
+        u->channels[i].rf_chain = CONTEXT_IF_CHAIN[i].rf_chain;
+        u->channels[i].freq_hz = CONTEXT_IF_CHAIN[i].freq_hz;
+    }
+    u->demod_set = true; u->demod = CONTEXT_DEMOD;
+    return LGW_HAL_SUCCESS;
+}
+uint64_t lgw_configuration_generation(void) { return runtime_generation; }
+bool lgw_runtime_faulted(void) { return runtime_fault; }
+int lgw_runtime_reset_acknowledge(void) {
+    if (CONTEXT_STARTED) return LGW_HAL_BUSY;
+    sx1261_cad_reset_acknowledge();
+    sx1261_aux_reset_acknowledge();
+    runtime_fault = false;
+    ++runtime_generation;
+    return LGW_HAL_SUCCESS;
+}
+int lgw_aux_cad_start(void) {
+    uint8_t status;
+    if (runtime_fault || sx1261_cad_is_active()) return LGW_HAL_BUSY;
+    if (CONTEXT_STARTED && !CONTEXT_BOARD.full_duplex) {
+        for (uint8_t i = 0; i < LGW_RF_CHAIN_NB; ++i) if (CONTEXT_RF_CHAIN[i].tx_enable) {
+            if (lgw_status(i,TX_STATUS,&status) != LGW_HAL_SUCCESS) return LGW_HAL_ERROR;
+            if (status == TX_SCHEDULED || status == TX_EMITTING) return LGW_HAL_BUSY;
+        }
+    }
+    if (sx1261_aux_is_busy()) return LGW_HAL_BUSY;
+    return sx1261_cad_start();
+}
+int lgw_reconfigure_rx(const struct lgw_rx_update *u, bool allow_restart, struct lgw_reconfigure_result *result) {
+    lgw_context_t old, candidate;
+    uint8_t status;
+    bool running;
+    if (!result) return LGW_HAL_ERROR;
+    *result = (struct lgw_reconfigure_result){LGW_RECONFIG_INVALID,runtime_generation,false,false};
+    if (!u || (u->rf_mask & ~((1U<<LGW_RF_CHAIN_NB)-1)) ||
+        (u->if_mask & ~((1U<<LGW_IF_CHAIN_NB)-1))) return LGW_HAL_ERROR;
+    if (runtime_fault) { result->outcome = LGW_RECONFIG_FAULT; return LGW_HAL_ERROR; }
+    if (!u->rf_mask && !u->if_mask && !u->demod_set) { result->outcome = LGW_RECONFIG_APPLIED; return LGW_HAL_SUCCESS; }
+    old = lgw_context; running = old.is_started;
+    /* _setconf routines change only cached configuration. Exclusive ownership
+     * is mandatory even for this temporary validation context. No HW writes. */
+    CONTEXT_STARTED = false;
+    for (uint8_t i = 0; i < LGW_RF_CHAIN_NB; ++i) if (u->rf_mask & (1U<<i)) {
+        struct lgw_conf_rxrf_s conf = u->rf[i];
+        if (lgw_rxrf_setconf(i,&conf) != LGW_HAL_SUCCESS) { lgw_context = old; return LGW_HAL_ERROR; }
+    }
+    for (uint8_t i = 0; i < LGW_IF_CHAIN_NB; ++i) if (u->if_mask & (1U<<i)) {
+        struct lgw_conf_rxif_s conf = u->channels[i];
+        if (lgw_rxif_setconf(i,&conf) != LGW_HAL_SUCCESS) { lgw_context = old; return LGW_HAL_ERROR; }
+    }
+    if (u->demod_set) {
+        struct lgw_conf_demod_s demod = u->demod;
+        if (lgw_demod_setconf(&demod) != LGW_HAL_SUCCESS) { lgw_context = old; return LGW_HAL_ERROR; }
+    }
+    candidate = lgw_context; lgw_context = old;
+    for (uint8_t i = 0; i < LGW_IF_CHAIN_NB; ++i)
+        if (candidate.if_chain_cfg[i].enable &&
+            (candidate.if_chain_cfg[i].rf_chain >= LGW_RF_CHAIN_NB ||
+             !candidate.rf_chain_cfg[candidate.if_chain_cfg[i].rf_chain].enable)) return LGW_HAL_ERROR;
+    if (running && !allow_restart) { result->outcome = LGW_RECONFIG_RESTART_REQUIRED; return LGW_HAL_ERROR; }
+    if (sx1261_cad_is_active() || sx1261_aux_is_busy()) { result->outcome = LGW_RECONFIG_BUSY; return LGW_HAL_BUSY; }
+    if (running) {
+        for (uint8_t i = 0; i < LGW_RF_CHAIN_NB; ++i) if (old.rf_chain_cfg[i].tx_enable) {
+            if (lgw_status(i,TX_STATUS,&status) != LGW_HAL_SUCCESS) return LGW_HAL_ERROR;
+            if (status == TX_EMITTING || status == TX_SCHEDULED) { result->outcome = LGW_RECONFIG_BUSY; return LGW_HAL_BUSY; }
+        }
+        result->timestamps_invalidated = true;
+        if (lgw_stop() != LGW_HAL_SUCCESS) {
+            runtime_fault = true; result->outcome = LGW_RECONFIG_FAULT; ++runtime_generation;
+            result->generation = runtime_generation; return LGW_HAL_ERROR;
+        }
+    }
+    lgw_context = candidate;
+    if (running && lgw_start() != LGW_HAL_SUCCESS) {
+        /* Startup may fail after opening COM/I2C while is_started is false.
+         * Do not call lgw_stop (a no-op then) or retry over unknown hardware. */
+        lgw_disconnect();
+        if (ts_fd >= 0) { i2c_linuxdev_close(ts_fd); ts_fd = -1; }
+        if (ad_fd >= 0) { i2c_linuxdev_close(ad_fd); ad_fd = -1; }
+        if (log_file) { fclose(log_file); log_file = NULL; }
+        lgw_context = old; CONTEXT_STARTED = false;
+        runtime_fault = true; ++runtime_generation;
+        result->outcome = LGW_RECONFIG_FAULT;
+        result->generation = runtime_generation; return LGW_HAL_ERROR;
+    }
+    if (!running) ++runtime_generation;
+    result->outcome = LGW_RECONFIG_APPLIED;
+    result->generation = runtime_generation;
+    result->restarted = running;
+    return LGW_HAL_SUCCESS;
+}

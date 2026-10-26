@@ -29,6 +29,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
+#include <errno.h>
 #include <signal.h>     /* sigaction */
 #include <getopt.h>     /* getopt_long */
 
@@ -93,7 +94,11 @@ void usage(void) {
     printf(" --mix  <uint> sx125x MIX gain [5..15]\n");
     printf(" --pwid <uint> sx1250 power index [0..22]\n");
     printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
-    printf(" --nhdr        Send LoRa packet with implicit header\n");
+    printf(" --nhdr        Send packet with implicit or fixed header\n");
+    printf(" --sync <hex>  Explicit 8-bit LoRa sync selector (00 is valid)\n");
+    printf(" --ldro <0|1>  Explicit LoRa LDRO, --crc / --no-crc select CRC\n");
+    printf(" --fsk-sync <hexbytes> 1..8 bytes, e.g. C194C1 or 000000\n");
+    printf(" --fsk-fixed --no-whitening --crc-ibm select FSK framing\n");
     printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
     printf(" --loop        Number of loops for HAL start/stop (HAL unitary test)\n");
     printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
@@ -145,6 +150,8 @@ int main(int argc, char **argv)
     struct lgw_conf_board_s boardconf;
     struct lgw_conf_rxrf_s rfconf;
     struct lgw_pkt_tx_s pkt;
+    struct lgw_pkt_tx_s extensions = {0};
+    bool crc_mode_set = false;
     struct lgw_tx_gain_lut_s txlut; /* TX gain table */
     uint8_t tx_status;
     uint32_t count_us;
@@ -175,6 +182,14 @@ int main(int argc, char **argv)
         {"loop", required_argument, 0, 0},
         {"nhdr", no_argument, 0, 0},
         {"fdd",  no_argument, 0, 0},
+        {"sync", required_argument, 0, 0},
+        {"ldro", required_argument, 0, 0},
+        {"no-crc", no_argument, 0, 0},
+        {"crc", no_argument, 0, 0},
+        {"fsk-sync", required_argument, 0, 0},
+        {"fsk-fixed", no_argument, 0, 0},
+        {"no-whitening", no_argument, 0, 0},
+        {"crc-ibm", no_argument, 0, 0},
         {0, 0, 0, 0}
     };
 
@@ -403,6 +418,30 @@ int main(int argc, char **argv)
                     }
                 } else if (strcmp(long_options[option_index].name, "nhdr") == 0) {
                     no_header = true;
+                } else if (strcmp(long_options[option_index].name, "sync") == 0) {
+                    char *end; errno = 0;
+                    unsigned long value = strtoul(optarg,&end,16);
+                    if (!*optarg || *end || errno || value > 255) return EXIT_FAILURE;
+                    extensions.synch_word = (uint8_t)value; extensions.synch_word_set = true;
+                } else if (strcmp(long_options[option_index].name, "ldro") == 0) {
+                    if (strcmp(optarg,"0") && strcmp(optarg,"1")) return EXIT_FAILURE;
+                    extensions.ldro_mode_manual = true; extensions.ldro_on = optarg[0] == '1';
+                } else if (strcmp(long_options[option_index].name, "no-crc") == 0) {
+                    extensions.no_crc = true; crc_mode_set = true;
+                } else if (strcmp(long_options[option_index].name, "crc") == 0) {
+                    extensions.no_crc = false; crc_mode_set = true;
+                } else if (strcmp(long_options[option_index].name, "fsk-sync") == 0) {
+                    char *end; size_t length = strlen(optarg); errno = 0;
+                    if (length < 2 || length > 16 || (length & 1) || optarg[0] == '-') return EXIT_FAILURE;
+                    extensions.fsk_sync_word = strtoull(optarg,&end,16);
+                    if (*end || errno) return EXIT_FAILURE;
+                    extensions.fsk_sync_word_size = length/2; extensions.fsk_sync_word_set = true;
+                } else if (strcmp(long_options[option_index].name, "fsk-fixed") == 0) {
+                    extensions.fsk_options_set = extensions.fsk_fixed_length = true;
+                } else if (strcmp(long_options[option_index].name, "no-whitening") == 0) {
+                    extensions.fsk_options_set = extensions.fsk_no_whitening = true;
+                } else if (strcmp(long_options[option_index].name, "crc-ibm") == 0) {
+                    extensions.fsk_options_set = extensions.fsk_crc_ibm = true;
                 } else if (strcmp(long_options[option_index].name, "fdd") == 0) {
                     full_duplex = true;
                 } else {
@@ -494,7 +533,7 @@ int main(int argc, char **argv)
         }
 
         /* Send packets */
-        memset(&pkt, 0, sizeof pkt);
+        pkt = extensions;
         pkt.rf_chain = rf_chain;
         pkt.freq_hz = ft;
         pkt.rf_power = rf_power;
@@ -522,6 +561,7 @@ int main(int argc, char **argv)
             pkt.coderate = CR_LORA_4_5;
             pkt.no_crc = true;
         }
+        if (crc_mode_set) pkt.no_crc = extensions.no_crc;
         pkt.invert_pol = invert_pol;
         pkt.preamble = preamble;
         pkt.no_header = no_header;

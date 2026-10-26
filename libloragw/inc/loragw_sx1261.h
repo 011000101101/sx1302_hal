@@ -42,6 +42,9 @@ static const char sx1261_pram_version_string[] = "2D06";
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC FUNCTIONS PROTOTYPES ------------------------------------------ */
 
+/* Serialized low-level owner state for LBT/spectral-scan versus CAD. */
+bool sx1261_aux_is_busy(void);
+void sx1261_aux_reset_acknowledge(void);
 int sx1261_connect(lgw_com_type_t com_type, const char *com_path);
 int sx1261_disconnect(void);
 

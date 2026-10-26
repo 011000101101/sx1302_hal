@@ -952,9 +952,25 @@ static int parse_SX130x_configuration(const char * conf_file) {
                     return -1;
                 }
             }
+            ifconf.lora_options_set = true;
+            ifconf.lora_invert_pol = json_object_dotget_boolean(conf_obj,"chan_Lora_std.invert_pol") == 1;
+            val = json_object_dotget_value(conf_obj,"chan_Lora_std.ldro");
+            if (json_value_get_type(val) == JSONBoolean) {
+                ifconf.lora_ldro_manual = true;
+                ifconf.lora_ldro_on = json_value_get_boolean(val) == 1;
+            }
+            val = json_object_dotget_value(conf_obj,"chan_Lora_std.preamble");
+            if (json_value_get_type(val) == JSONNumber) {
+                double number = json_value_get_number(val);
+                if (number < 1 || number > 65535 || floor(number) != number) return -1;
+                ifconf.lora_preamble_symbols = (uint16_t)number;
+            }
             val = json_object_dotget_value(conf_obj, "chan_Lora_std.synch_word");
             if (json_value_get_type(val) == JSONNumber) {
-                ifconf.sync_word = (uint8_t)json_value_get_number(val);
+                double number = json_value_get_number(val);
+                if (number < 0 || number > 255 || floor(number) != number) return -1;
+                ifconf.sync_word = (uint8_t)number;
+                ifconf.sync_word_set = true;
             } else {
                 ifconf.sync_word = 0;
             }
@@ -1004,6 +1020,34 @@ static int parse_SX130x_configuration(const char * conf_file) {
             else if (bw <= 500000) ifconf.bandwidth = BW_500KHZ;
             else ifconf.bandwidth = BW_UNDEFINED;
 
+            /* Fork options are opt-in; omitted fields retain upstream defaults. */
+            ifconf.fsk_options_set = json_object_dotget_boolean(conf_obj,"chan_FSK.options") == 1;
+            if (ifconf.fsk_options_set) {
+                ifconf.fsk_channel_bw_exponent = 3;
+                val = json_object_dotget_value(conf_obj,"chan_FSK.bandwidth_exponent");
+                if (json_value_get_type(val) == JSONNumber) {
+                    double number = json_value_get_number(val);
+                    if (number < 0 || number > 7 || floor(number) != number) return -1;
+                    ifconf.fsk_channel_bw_exponent = (uint8_t)number;
+                }
+                ifconf.fsk_fixed_length = json_object_dotget_boolean(conf_obj,"chan_FSK.fixed_length") == 1;
+                ifconf.fsk_no_crc = json_object_dotget_boolean(conf_obj,"chan_FSK.no_crc") == 1;
+                ifconf.fsk_no_whitening = json_object_dotget_boolean(conf_obj,"chan_FSK.no_whitening") == 1;
+                ifconf.fsk_crc_ibm = json_object_dotget_boolean(conf_obj,"chan_FSK.crc_ibm") == 1;
+                double length = json_object_dotget_number(conf_obj,"chan_FSK.payload_length");
+                if (length < 0 || length > 255 || floor(length) != length) return -1;
+                ifconf.fsk_payload_length = (uint8_t)length;
+            }
+            const char *sync = json_object_dotget_string(conf_obj,"chan_FSK.sync_word");
+            if (sync) {
+                char *end; errno = 0;
+                ifconf.sync_word = strtoull(sync,&end,16);
+                if (!*sync || *end || errno || sync[0] == '-') return -1;
+                double length = json_object_dotget_number(conf_obj,"chan_FSK.sync_word_size");
+                if (length < 1 || length > 8 || floor(length) != length) return -1;
+                ifconf.sync_word_size = (uint8_t)length;
+                ifconf.sync_word_set = true;
+            }
             MSG("INFO: FSK channel> radio %i, IF %i Hz, %u Hz bw, %u bps datarate\n", ifconf.rf_chain, ifconf.freq_hz, bw, ifconf.datarate);
         }
         if (lgw_rxif_setconf(9, &ifconf) != LGW_HAL_SUCCESS) {
@@ -3158,7 +3202,12 @@ void thread_down(void) {
             /* parse sync word (optional field) */
             val = json_object_get_value(txpk_obj,"sync");
             if (val != NULL) {
-                txpkt.synch_word = (int8_t)json_value_get_number(val);
+                double number = json_value_get_number(val);
+                if (json_value_get_type(val) != JSONNumber || number < 0 || number > 255 || floor(number) != number) {
+                    MSG("WARNING: invalid LoRa sync selector\n"); continue;
+                }
+                txpkt.synch_word = (uint8_t)number;
+                txpkt.synch_word_set = true;
             }
 
             /* parse sync word low bits (optional field) */

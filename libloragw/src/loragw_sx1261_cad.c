@@ -1,5 +1,10 @@
 /* Experimental SX1261 CAD command path. Revised BSD; see LICENSE.TXT. */
 #include <stddef.h>
+#include <math.h>
+#include <stdbool.h>
+static bool cad_active;
+bool sx1261_cad_is_active(void) { return cad_active; }
+void sx1261_cad_reset_acknowledge(void) { cad_active = false; }
 #include "loragw_sx1261.h"
 #include "loragw_sx1261_cad.h"
 
@@ -12,11 +17,27 @@
 #define SET_CAD_PARAMS ((sx1261_op_code_t)0x88)
 #define CAD_IRQ 0x0180
 
+int sx1261_cad_resolve_default(const struct sx1261_cad_request *r, struct sx1261_cad_config *c) {
+    if (!r || !c || (r->explicit_sensitivity && !isfinite(r->sensitivity_dbm))) return -1;
+    if (r->explicit_sensitivity) return -3;
+    if (r->frequency_hz < 150000000 || r->frequency_hz > 960000000 ||
+        (r->bandwidth_hz != 125000 && r->bandwidth_hz != 250000 && r->bandwidth_hz != 500000) ||
+        r->spreading_factor < 7 || r->spreading_factor > 12 || r->coding_rate < 1 || r->coding_rate > 4 || r->symbols != 4) return -1;
+    /* Source: Meshtastic a597230... SX126xInterface.cpp278-298 and its pinned
+     * RadioLib 536c726... SX126x_commands.cpp57-90, commands.h255-264:
+     * https://github.com/jgromes/RadioLib/blob/536c7267362e2c1345be7054ba45e503252975ff/src/modules/SX126x/SX126x_commands.cpp#L57-L90
+     * Reference-derived default only, NOT a calibrated physical dBm threshold.
+     * Portable counts are actual symbols; raw 0x02 is encoded only below. */
+    *c = (struct sx1261_cad_config){r->frequency_hz,r->bandwidth_hz,r->spreading_factor,
+        r->coding_rate,r->ldro,4,(uint8_t)(r->spreading_factor+13),10};
+    return 0;
+}
+
 int sx1261_cad_configure(const struct sx1261_cad_config *c) {
     uint8_t b[8];
     uint8_t bw, symbols;
     uint32_t frequency;
-    if (c == NULL || c->frequency_hz < 150000000U || c->frequency_hz > 960000000U ||
+    if (cad_active || sx1261_aux_is_busy() || c == NULL || c->frequency_hz < 150000000U || c->frequency_hz > 960000000U ||
         c->spreading_factor < 5 || c->spreading_factor > 12 || c->coding_rate < 1 || c->coding_rate > 4) return -1;
     switch (c->bandwidth_hz) {
         case 125000: bw = 4; break;
@@ -52,10 +73,15 @@ int sx1261_cad_configure(const struct sx1261_cad_config *c) {
 }
 
 int sx1261_cad_start(void) {
+    if (cad_active || sx1261_aux_is_busy()) return -1;
     uint8_t b[2] = {0xFF, 0xFF};
     if (sx1261_reg_w(SX1261_CLR_IRQ_STATUS, b, 2) != 0) return -1;
     b[0] = 0;
-    return sx1261_reg_w(SET_CAD, b, 0);
+    /* A failed transport result does not prove that SET_CAD was not delivered.
+     * Retain ownership until a successful cancel or an explicit board reset. */
+    cad_active = true;
+    if (sx1261_reg_w(SET_CAD, b, 0) != 0) return -1;
+    return 0;
 }
 
 int sx1261_cad_poll(bool *done, bool *detected, uint16_t *irq) {
@@ -68,6 +94,7 @@ int sx1261_cad_poll(bool *done, bool *detected, uint16_t *irq) {
     *irq = ((uint16_t)b[1] << 8) | b[2];
     *done = (*irq & 0x0080) != 0;
     *detected = *done && ((*irq & 0x0100) != 0);
+    if (*done) cad_active = false;
     return 0;
 }
 
@@ -76,6 +103,7 @@ int sx1261_cad_cancel(void) {
     int result = sx1261_reg_w(SX1261_SET_STANDBY, b, 1);
     b[0] = 0xFF; b[1] = 0xFF;
     if (sx1261_reg_w(SX1261_CLR_IRQ_STATUS, b, 2) != 0) result = -1;
+    if (result == 0) cad_active = false;
     return result;
 }
 

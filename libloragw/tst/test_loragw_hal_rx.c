@@ -24,6 +24,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #endif
 
 #include <stdint.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,7 @@ License: Revised BSD License, see LICENSE.TXT file include in the project
 #include <getopt.h>
 
 #include "loragw_hal.h"
+#include "loragw_runtime.h"
 #include "loragw_reg.h"
 #include "loragw_aux.h"
 
@@ -67,6 +69,33 @@ static void sig_handler(int sigio) {
     }
 }
 
+/* Reapply a known RX profile without changing its RF settings. This diagnostic
+ * owns the complete HAL lifecycle; production lease/clock handling belongs to
+ * the IRadio provider. Do not continue on a faulted or unexpected result. */
+static int runtime_smoke(void) {
+    struct lgw_rx_update snapshot, update = {0};
+    struct lgw_reconfigure_result result;
+    uint64_t generation = lgw_configuration_generation();
+    if (lgw_get_rx_configuration(&snapshot) != LGW_HAL_SUCCESS) return -1;
+    update.if_mask = 1U;
+    update.channels[0] = snapshot.channels[0];
+    update.channels[0].rf_chain = LGW_RF_CHAIN_NB; /* Invalid; must not stop RX. */
+    if (lgw_reconfigure_rx(&update, true, &result) != LGW_HAL_ERROR ||
+        result.outcome != LGW_RECONFIG_INVALID ||
+        lgw_configuration_generation() != generation) return -1;
+    update.channels[0] = snapshot.channels[0];
+    if (lgw_reconfigure_rx(&update, false, &result) != LGW_HAL_ERROR ||
+        result.outcome != LGW_RECONFIG_RESTART_REQUIRED ||
+        result.timestamps_invalidated || lgw_configuration_generation() != generation) return -1;
+    if (lgw_reconfigure_rx(&update, true, &result) != LGW_HAL_SUCCESS ||
+        result.outcome != LGW_RECONFIG_APPLIED || !result.restarted ||
+        !result.timestamps_invalidated || result.generation <= generation) return -1;
+    printf("RUNTIME_SMOKE PASS generation=%" PRIu64 " -> %" PRIu64
+           " timestamps_invalidated=1; check packet reception after restart\n",
+           generation, result.generation);
+    return 0;
+}
+
 void usage(void) {
     printf("Library version information: %s\n", lgw_version_info());
     printf("Available options:\n");
@@ -84,6 +113,7 @@ void usage(void) {
     printf(" -m <uint>     Channel frequency plan mode [0:LoRaWAN-like, 1:Same frequency for all channels (-400000Hz on RF0)]\n");
     printf(" -j            Set radio in single input mode (SX1250 only)\n");
     printf( "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" );
+    printf(" --runtime-smoke Reapply RX profile once; verify invalid/restart-required/restart outcomes\n");
     printf(" --fdd         Enable Full-Duplex mode (CN490 reference design)\n");
 }
 
@@ -110,6 +140,7 @@ int main(int argc, char **argv)
     bool single_input_mode = false;
     float rssi_offset = 0.0;
     bool full_duplex = false;
+    bool exercise_runtime = false;
 
     struct lgw_conf_board_s boardconf;
     struct lgw_conf_rxrf_s rfconf;
@@ -152,6 +183,7 @@ int main(int argc, char **argv)
     int option_index = 0;
     static struct option long_options[] = {
         {"fdd",  no_argument, 0, 0},
+        {"runtime-smoke", no_argument, 0, 0},
         {0, 0, 0, 0}
     };
 
@@ -258,6 +290,8 @@ int main(int argc, char **argv)
             case 0:
                 if (strcmp(long_options[option_index].name, "fdd") == 0) {
                     full_duplex = true;
+                } else if (strcmp(long_options[option_index].name, "runtime-smoke") == 0) {
+                    exercise_runtime = true;
                 } else {
                     printf("ERROR: argument parsing options. Use -h to print help\n");
                     return EXIT_FAILURE;
@@ -373,6 +407,12 @@ int main(int argc, char **argv)
         x = lgw_start();
         if (x != 0) {
             printf("ERROR: failed to start the gateway\n");
+            return EXIT_FAILURE;
+        }
+
+        if (exercise_runtime && cnt_loop == 1 && runtime_smoke() != 0) {
+            printf("RUNTIME_SMOKE FAIL fault=%d; stop and apply installed board reset before reuse\n",
+                   lgw_runtime_faulted());
             return EXIT_FAILURE;
         }
 

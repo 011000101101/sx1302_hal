@@ -91,6 +91,13 @@ void wait_ms(unsigned long delay_ms) {
 uint32_t lora_packet_time_on_air(const uint8_t bw, const uint8_t sf, const uint8_t cr, const uint16_t n_symbol_preamble,
                                  const bool no_header, const bool no_crc, const uint8_t size,
                                  double * out_nb_symbols, uint32_t * out_nb_symbols_payload, uint16_t * out_t_symbol_us) {
+    return lora_packet_time_on_air_ext(bw,sf,cr,n_symbol_preamble,no_header,no_crc,size,
+        false,false,out_nb_symbols,out_nb_symbols_payload,out_t_symbol_us);
+}
+
+uint32_t lora_packet_time_on_air_ext(const uint8_t bw, const uint8_t sf, const uint8_t cr, const uint16_t n_symbol_preamble,
+                                 const bool no_header, const bool no_crc, const uint8_t size,
+                                 const bool ldro_manual, const bool ldro_on, double * out_nb_symbols, uint32_t * out_nb_symbols_payload, uint16_t * out_t_symbol_us) {
     uint8_t H, DE, n_bit_crc;
     uint8_t bw_pow;
     uint16_t t_symbol_us;
@@ -132,7 +139,7 @@ uint32_t lora_packet_time_on_air(const uint8_t bw, const uint8_t sf, const uint8
 
     /* Packet parameters */
     H = (no_header == false) ? 1 : 0; /* header is always enabled, except for beacons */
-    DE = (sf >= 11) ? 1 : 0; /* Low datarate optimization enabled for SF11 and SF12 */
+    DE = ldro_manual ? ldro_on : (((bw == BW_125KHZ) && sf >= 11) || ((bw == BW_250KHZ) && sf == 12)); /* Low datarate optimization enabled for SF11 and SF12 */
     n_bit_crc = (no_crc == false) ? 16 : 0;
 
     /* Number of symbols in the payload */

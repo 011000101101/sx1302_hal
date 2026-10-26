@@ -209,7 +209,7 @@ int sx1302_lora_service_correlator_configure(struct lgw_conf_rxif_s * cfg);
 @param lora_service_sync_word   synch word for the service LoRa modem. use default (LoRaWAN public or private) if 0
 @return LGW_REG_SUCCESS if success, LGW_REG_ERROR otherwise
 */
-int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word);
+int sx1302_lora_syncword(bool public, uint8_t lora_service_sf, uint8_t lora_service_sync_word, bool explicit_service_sync);
 
 /**
 @brief Configure the LoRa multi-SF modems
@@ -451,6 +451,9 @@ int sx1302_set_gpio(uint8_t gpio_reg_val);
 @return TODO
 */
 double sx1302_dc_notch_delay(double if_freq_hz);
+
+/* Pure 8-bit selector conversion shared by service RX and packet TX. */
+int sx1302_syncword_symbols(uint8_t sync, uint8_t fine, uint8_t *first, uint8_t *second);
 
 #endif
 

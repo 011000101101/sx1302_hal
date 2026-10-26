@@ -15,6 +15,24 @@ struct sx1261_cad_config {
     uint8_t det_min;
 };
 
+struct sx1261_cad_request {
+    uint32_t frequency_hz;
+    uint32_t bandwidth_hz;
+    uint8_t spreading_factor;
+    uint8_t coding_rate;
+    bool ldro;
+    uint8_t symbols;
+    bool explicit_sensitivity;
+    double sensitivity_dbm;
+};
+/* Pure default resolution. -3 means explicit dBm conversion not implemented;
+ * -1 unsupported/invalid profile. No register writes on either path. */
+int sx1261_cad_resolve_default(const struct sx1261_cad_request *request,
+                              struct sx1261_cad_config *resolved);
+bool sx1261_cad_is_active(void);
+/* Caller confirms a completed physical radio reset. */
+void sx1261_cad_reset_acknowledge(void);
+
 /* Caller owns the connected auxiliary radio exclusively, with no active LBT or
  * spectral scan. No concentrator/global startup configuration is changed.
  * These calls use polled IRQs; caller supplies monotonic timeout/cancellation. */
